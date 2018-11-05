@@ -1,0 +1,13 @@
+{
+	"name": "@device.farm/si-ookey",
+	"version": "1.0.0",
+	"dependencies": {
+		"@device.farm/si-application-events": "1.0.0"
+	},
+	"silicon": {
+		"sources": [
+			"ookey-rx.cpp",
+			"ookey-tx.cpp"
+		]
+	}
+}
