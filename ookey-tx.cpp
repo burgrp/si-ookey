@@ -27,7 +27,7 @@ class Encoder
         buffer[0] = 0xFF;
         buffer[1] = 0xFF;
         buffer[2] = 0xFF;
-        buffer[3] = 0xAA;
+        buffer[3] = 0x7F;
         buffer[4] = address & 0xFF;
         buffer[5] = address >> 8;
     }

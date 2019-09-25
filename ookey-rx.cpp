@@ -1,11 +1,15 @@
 #include <limits.h>
 
+volatile int x;
+
 namespace ookey
 {
 namespace rx
 {
 
-const int timeSamplesCount = 8;
+const int MARK_PIN = 8;
+const int startBitWaitCount = 100;
+const int timeSamplesCount = 12;
 
 class Decoder : public applicationEvents::EventHandler
 {
@@ -15,7 +19,7 @@ class Decoder : public applicationEvents::EventHandler
   int bitCounter;
   int rxEventId;
 
-  unsigned short timeSamples[timeSamplesCount];
+  unsigned int timeSamples[timeSamplesCount];
   int timeSampleIdx = 0;
 
   virtual void setTimerInterrupt(int time) = 0;
@@ -24,10 +28,11 @@ class Decoder : public applicationEvents::EventHandler
 
   void mark()
   {
-    target::GPIOA.ODR.setODR(1, 1);
-    for (volatile int c = 0; c < 50; c++)
+    target::PORT.DIRSET.setDIRSET(1 << MARK_PIN);
+    target::PORT.OUTSET.setOUTSET(1 << MARK_PIN);
+    for (volatile int c = 0; c < 10; c++)
       ;
-    target::GPIOA.ODR.setODR(1, 0);
+    target::PORT.OUTCLR.setOUTCLR(1 << MARK_PIN);
   }
 
   void onEvent()
@@ -39,39 +44,58 @@ public:
   void init(unsigned short address)
   {
     this->address = address;
-    target::GPIOA.MODER.setMODER(1, 1);
     rxEventId = applicationEvents::createEventId();
     handle(rxEventId);
+
+    listen();
   }
 
   void listen()
   {
     setTimerInterrupt(0);
+    for (int c = 0; c < timeSamplesCount; c++)
+    {
+      timeSamples[c] = 0xFFFFFFFF + (c & 1);
+    }
     setRfPinInterrupt(true);
   }
 
-  void handleTimerInterrupt(bool val)
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  void handleTimerInterrupt(int rfPinValue)
   {
+    if (bitCounter == -startBitWaitCount) {
+      setTimerInterrupt(bitTime);
+    }
 
     if (bitCounter < 0)
     {
-      setTimerInterrupt(bitTime);
-      bitCounter++;
+      if (!rfPinValue) {
+        bitCounter = 0;
+      } else {
+        mark();
+        bitCounter++;
+        if (bitCounter == 0) {
+          listen();
+        }
+      }
     }
     else
     {
-
       //mark();
-
       int byteIdx = bitCounter >> 3;
-      int bitIdx = bitCounter & 0x07;      
+      int bitIdx = bitCounter & 0x07;
 
       if (
-         (byteIdx == 1 && buffer[0] != (address & 0xFF)) || 
-         (byteIdx == 2 && buffer[1] != (address >> 8))
-         ) {
+          (byteIdx == 1 && buffer[0] != (address & 0xFF)) ||
+          (byteIdx == 2 && buffer[1] != (address >> 8)))
+      {
         listen();
-      } else {
+      }
+      else
+      {
         if (byteIdx > 2 && byteIdx == 2 + 1 + buffer[2] + 2)
         {
           int calculatedCrc = 0x55;
@@ -85,7 +109,9 @@ public:
           {
             applicationEvents::schedule(rxEventId);
             setTimerInterrupt(0);
-          } else {     
+          }
+          else
+          {
             listen();
           }
         }
@@ -95,51 +121,44 @@ public:
           {
             buffer[byteIdx] = 0;
           }
-          buffer[byteIdx] |= val << bitIdx;
+          buffer[byteIdx] |= (rfPinValue ^ (bitCounter & 1)) << bitIdx;
+
           bitCounter++;
         }
       }
-    }
+    }    
   }
 
-  void getTimes(int offset, int &min, int &max)
-  {
-    for (int c = 0; c<timeSamplesCount>> 1; c++)
-    {
-      int t = timeSamples[(timeSampleIdx - c - offset) & (timeSamplesCount - 1)];
-      if (t > max)
-      {
-        max = t;
-      }
-      if (t < min)
-      {
-        min = t;
-      }
-    }
-  }
-
-  void handleRfPinInterrupt(int time)
+  void handleRfPinInterrupt(unsigned int time)
   {
     timeSamples[timeSampleIdx] = time;
 
-    int fastMin = INT_MAX;
-    int fastMax = INT_MIN;
-    int slowMin = INT_MAX;
-    int slowMax = INT_MIN;
-    getTimes(-timeSamplesCount >> 1, fastMin, fastMax);
-    getTimes(0, slowMin, slowMax);
-
-    if (
-        fastMax * 5 < slowMin * 4 &&
-        fastMin * 5 > slowMax * 2)
-    {
-      bitTime = fastMin + fastMax >> 1;
-      bitCounter = -1;
-      setRfPinInterrupt(false);
-      setTimerInterrupt(11 * bitTime >> 4);
+    timeSampleIdx++;
+    if (timeSampleIdx == timeSamplesCount) {
+      timeSampleIdx = 0;
     }
 
-    timeSampleIdx = (timeSampleIdx + 1) & (timeSamplesCount - 1);
+    unsigned int min = 0xFFFFFFFF;
+    unsigned int max = 0;
+    for (int c = 0; c < timeSamplesCount; c++)
+    {
+      int v = timeSamples[c];
+      if (v > max) max = v;
+      if (v < min) min = v;
+    }
+
+    bool locked = min > (max - (max >> 4));
+
+    if (locked)
+    {
+      setRfPinInterrupt(false);
+      bitTime = (max + min) / 2;
+      bitCounter = -startBitWaitCount;
+      mark();
+      setTimerInterrupt(bitTime + bitTime / 3);
+    } else {
+       setTimerInterrupt(0);
+    }
   }
 };
 
