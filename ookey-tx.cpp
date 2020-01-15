@@ -3,16 +3,13 @@ namespace ookey
 namespace tx
 {
 
-// 16 sync manchaster pulses
-const unsigned char PREAMBLE[4] = {0xFF, 0xFF, 0xFF, 0xAA};
-
 class Encoder
 {
     virtual void setTimerInterrupt(bool enabled) = 0;
     virtual void setRfPin(bool state) = 0;
 
     unsigned char buffer[
-        sizeof(PREAMBLE) + // preamble
+        4 + // preamble
         2 + // address
         1 + // size
         256 + // data
@@ -32,10 +29,10 @@ class Encoder
         buffer[5] = address >> 8;
     }
 
-    bool busy()
-    {
-        return counter >> 4 < size;
-    }
+    // bool busy()
+    // {
+    //     return counter >> 4 < size;
+    // }
 
     void send(unsigned char *data, int len)
     {
@@ -52,16 +49,20 @@ class Encoder
 
         size = i;
         counter = 0;
+
         setTimerInterrupt(true);
     }
 
     void handleTimerInterrupt()
     {
-        int byteIdx = (counter >> 4);
+        int byteIdx = (counter >> 5);
         if (byteIdx < size)
-        {
-            int bitIdx = (counter >> 1) & 0x07;
-            setRfPin(((buffer[byteIdx] >> bitIdx) ^ counter) & 1);
+        {            
+            int bitIdx = (counter >> 2) & 0x07;
+
+            int symbolIdx = counter & 3;
+
+            setRfPin(symbolIdx == 0? 1: symbolIdx == 3? 0: ((buffer[byteIdx] >> bitIdx)  & 1));
 
             counter++;
         }
