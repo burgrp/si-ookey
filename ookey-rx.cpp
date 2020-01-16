@@ -58,14 +58,13 @@ public:
   void pushBit(int bit) {
 
     if (dataBits < 0) {
-
       // preamble
       if (bit) {
         preambleBits++;
       } else {
         if (preambleBits > MIN_PREAMBLE_BITS && !pendingData) {
           // ok, there was enough of preamble ones, let's start
-          dataBits = 0;
+          dataBits = 0;          
         } else {
           // preamble too short
           restart();
